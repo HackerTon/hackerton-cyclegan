@@ -6,9 +6,14 @@ import argparse
 import os
 from tensorflow_examples.models.pix2pix import pix2pix
 
+
 NUM_ITERATION = 200
-LAMBDA = tf.constant(10, tf.float16)
-TAKEN_NUM = 100
+LAMBDA = tf.constant(5, tf.float32)
+TAKEN_NUM = 1000
+BETA_1 = 0.5
+AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+tf.random.set_seed(123456)
 
 
 def readdecode(filename):
@@ -21,7 +26,6 @@ def readdecode(filename):
     image = tf.image.convert_image_dtype(image, tf.float32)
     image = tf.image.resize(image, (256, 256))
     image = image * 2 - 1
-    image = tf.image.convert_image_dtype(image, tf.float16)
 
     return image
 
@@ -94,14 +98,11 @@ def create_dataset_celb(dir):
     def adddir(x, y):
         return dir + 'img_align_celeba/' + x, y
 
-    fmale = fmale.map(adddir)
-    male = male.map(adddir)
+    fmale = fmale.map(adddir, AUTOTUNE)
+    male = male.map(adddir, AUTOTUNE)
 
-    fmale = fmale.map(link2image, tf.data.experimental.AUTOTUNE)
-    male = male.map(link2image, tf.data.experimental.AUTOTUNE)
-
-    fmale = fmale.shuffle(100)
-    male = male.shuffle(100)
+    fmale = fmale.map(link2image, AUTOTUNE)
+    male = male.map(link2image, AUTOTUNE)
 
     return fmale, male
 
@@ -149,8 +150,8 @@ def train(args):
             g_y = g_gan(y, training=True)
             f_x = f_gan(x, training=True)
 
-            total_gan_loss_g = g_loss + (LAMBDA*cyloss) + identity_loss(g_y, y)
-            total_gan_loss_f = f_loss + (LAMBDA*cyloss) + identity_loss(f_x, x)
+            total_gan_loss_g = g_loss + (LAMBDA*cyloss)
+            total_gan_loss_f = f_loss + (LAMBDA*cyloss)
 
         g_grads = tape.gradient(
             total_gan_loss_g, g_gan.trainable_variables)
@@ -175,7 +176,7 @@ def train(args):
         return g_loss, f_loss, dis_g_loss, dis_f_loss, g_out, f_out
 
     @tf.function
-    def train_step_g(x, y):
+    def train_step_g(x, y, train_dis):
         with tf.GradientTape(persistent=True) as tape:
             g_out = g_gan(x, training=True)
             cycle_g = f_gan(g_out, training=True)
@@ -187,11 +188,7 @@ def train(args):
             dis_g_y = dis_g(y, training=True)
             dis_f_y = dis_f(x, training=True)
 
-            dis_g_loss = disloss(dis_g_y, dis_g_out)
-            dis_f_loss = disloss(dis_f_y, dis_f_out)
-
             cyloss = cycleloss(cycle_g, cycle_f, x, y)
-
             g_loss = ganloss(dis_g_out)
             f_loss = ganloss(dis_f_out)
 
@@ -200,37 +197,28 @@ def train(args):
 
             total_gan_loss_g = g_loss + (LAMBDA*cyloss) + identity_loss(g_y, y)
             total_gan_loss_f = f_loss + (LAMBDA*cyloss) + identity_loss(f_x, x)
+            dis_g_loss = disloss(dis_g_y, dis_g_out)
+            dis_f_loss = disloss(dis_f_y, dis_f_out)
 
-            # Scale Gradient
-            scaled_loss_g = g_gan_opti.get_scaled_loss(total_gan_loss_g)
-            scaled_loss_f = f_gan_opti.get_scaled_loss(total_gan_loss_f)
-            scaled_loss_dg = dis_g_opti.get_scaled_loss(dis_g_loss)
-            scaled_loss_df = dis_f_opti.get_scaled_loss(dis_f_loss)
-
-        # Calculate scale gradient
-        g_grads = tape.gradient(scaled_loss_g, g_gan.trainable_variables)
-        f_grads = tape.gradient(scaled_loss_f, f_gan.trainable_variables)
-        dis_g_grads = tape.gradient(scaled_loss_dg, dis_g.trainable_variables)
-        dis_f_grads = tape.gradient(scaled_loss_df, dis_f.trainable_variables)
-
-        # Unscale gradient
-        g_grads = g_gan_opti.get_unscaled_gradients(g_grads)
-        f_grads = f_gan_opti.get_unscaled_gradients(f_grads)
-        dis_g_grads = dis_g_opti.get_unscaled_gradients(dis_g_grads)
-        dis_f_grads = dis_f_opti.get_unscaled_gradients(dis_f_grads)
-
-        # Apply unscaled gradient
+        g_grads = tape.gradient(g_loss, g_gan.trainable_variables)
+        f_grads = tape.gradient(f_loss, f_gan.trainable_variables)
         g_gan_opti.apply_gradients(zip(g_grads, g_gan.trainable_variables))
         f_gan_opti.apply_gradients(zip(f_grads, f_gan.trainable_variables))
-        dis_g_opti.apply_gradients(zip(dis_g_grads, dis_g.trainable_variables))
-        dis_f_opti.apply_gradients(zip(dis_f_grads, dis_f.trainable_variables))
+
+        if train_dis:
+            dis_g_grads = tape.gradient(dis_g_loss, dis_g.trainable_variables)
+            dis_f_grads = tape.gradient(dis_f_loss, dis_f.trainable_variables)
+            dis_g_opti.apply_gradients(
+                zip(dis_g_grads, dis_g.trainable_variables))
+            dis_f_opti.apply_gradients(
+                zip(dis_f_grads, dis_f.trainable_variables))
 
         return g_loss, f_loss, dis_g_loss, dis_f_loss
 
     if args.gpu:
         print('GPU MODE')
-        from tensorflow.keras import mixed_precision
-        mixed_precision.experimental.set_policy('float16')
+        # from tensorflow.keras import mixed_precision
+        # mixed_precision.experimental.set_policy('float16')
 
         g_gan = pix2pix.unet_generator(3, norm_type='instancenorm')
         f_gan = pix2pix.unet_generator(3, norm_type='instancenorm')
@@ -240,22 +228,10 @@ def train(args):
         dis_f = pix2pix.discriminator(
             norm_type='instancenorm', target=False)
 
-        dis_g.layers.append(tf.keras.layers.Activation('sigmoid'))
-        dis_f.layers.append(tf.keras.layers.Activation('sigmoid'))
-
-        g_gan_opti = tf.keras.optimizers.Adam(2e-04)
-        f_gan_opti = tf.keras.optimizers.Adam(2e-04)
-        dis_g_opti = tf.keras.optimizers.Adam(2e-04)
-        dis_f_opti = tf.keras.optimizers.Adam(2e-04)
-
-        g_gan_opti = mixed_precision.experimental.LossScaleOptimizer(
-            g_gan_opti, 'dynamic')
-        f_gan_opti = mixed_precision.experimental.LossScaleOptimizer(
-            f_gan_opti, 'dynamic')
-        dis_g_opti = mixed_precision.experimental.LossScaleOptimizer(
-            dis_g_opti, 'dynamic')
-        dis_f_opti = mixed_precision.experimental.LossScaleOptimizer(
-            dis_f_opti, 'dynamic')
+        g_gan_opti = tf.keras.optimizers.Adam(2e-04, BETA_1)
+        f_gan_opti = tf.keras.optimizers.Adam(2e-04, BETA_1)
+        dis_g_opti = tf.keras.optimizers.Adam(2e-04, BETA_1)
+        dis_f_opti = tf.keras.optimizers.Adam(2e-04, BETA_1)
     else:
         print('CPU MODE')
         g_gan = pix2pix.unet_generator(3, norm_type='instancenorm')
@@ -266,12 +242,8 @@ def train(args):
         dis_f = pix2pix.discriminator(
             norm_type='instancenorm', target=False)
 
-        dis_g.layers.append(tf.keras.layers.Activation('sigmoid'))
-        dis_f.layers.append(tf.keras.layers.Activation('sigmoid'))
-
         g_gan_opti = tf.keras.optimizers.Adam(2e-04)
         f_gan_opti = tf.keras.optimizers.Adam(2e-04)
-
         dis_g_opti = tf.keras.optimizers.Adam(2e-04)
         dis_f_opti = tf.keras.optimizers.Adam(2e-04)
 
@@ -279,8 +251,8 @@ def train(args):
 
     loss_name = ['g_loss', 'f_loss', 'dis_g_loss', 'dis_f_loss']
 
-    batch_men = mends.take(TAKEN_NUM).batch(1)
-    batch_women = womends.take(TAKEN_NUM).batch(1)
+    batch_men = mends.take(TAKEN_NUM).cache().shuffle(1000).batch(1)
+    batch_women = womends.take(TAKEN_NUM).cache().shuffle(1000).batch(1)
 
     date_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     train_log_dir = f'logs/{date_time}/train'
@@ -306,16 +278,21 @@ def train(args):
         print(f'Loaded previous checkpoint {ckpt_manager.latest_checkpoint}')
 
     for epoch in range(NUM_ITERATION):
-        history = np.zeros([100, 4])
-
+        history = np.zeros([1000, 4])
         init_time = time.time()
 
         if args.gpu:
             for index, (x, y) in tf.data.Dataset.zip((batch_women, batch_men)).enumerate():
-                # g_loss, f_loss, dis_g_loss, dis_f_loss = train_step_g(x, y)
-                train_step_g(x, y)
 
-                # history[index] = [g_loss, f_loss, dis_g_loss, dis_f_loss]
+                if (index + 1) % 2 == 0:
+                    g_loss, f_loss, dis_g_loss, dis_f_loss = train_step_g(
+                        x, y, tf.constant(True))
+                else:
+                    g_loss, f_loss, dis_g_loss, dis_f_loss = train_step_g(
+                        x, y, tf.constant(False))
+
+                print(f'gl:{g_loss}, fl{f_loss}, dgl:{dis_g_loss}, dfl{dis_f_loss}')
+                history[index] = [g_loss, f_loss, dis_g_loss, dis_f_loss]
         else:
             with tf.device('/cpu:0'):
                 for index, (x, y) in tf.data.Dataset.zip((batch_women, batch_men)).enumerate():
@@ -324,7 +301,6 @@ def train(args):
                     history[index] = [g_loss, f_loss, dis_g_loss, dis_f_loss]
 
         final_time = time.time() - init_time
-
         print(f'epoch: {epoch+1} took {round(final_time)}')
 
         with train_summary_writer.as_default():
@@ -332,9 +308,12 @@ def train(args):
                 tf.summary.scalar(name, loss, epoch)
                 print(f'{name}: {loss}')
 
-            tf.summary.image('output_fm_from_m', f_gan((y + 1) * 0.5), epoch)
+            for test in womends.take(1):
+                tf.summary.image('output_m_from_fm',
+                                 g_gan((tf.expand_dims(test, 0) + 1) * 0.5), epoch)
 
-        # ckpt_manager.save()
+        if ((epoch+1) % 30 == 0):
+            ckpt_manager.save()
 
         print()
 
