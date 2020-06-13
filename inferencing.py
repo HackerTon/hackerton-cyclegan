@@ -1,10 +1,11 @@
 import tensorflow as tf
 from tensorflow_examples.models.pix2pix import pix2pix
+from model import generator
 
 
 def convert():
-    g_gan = pix2pix.unet_generator(3, norm_type='instancenorm')
-    f_gan = pix2pix.unet_generator(3, norm_type='instancenorm')
+    g_gan = generator()
+    f_gan = generator()
 
     dis_g = pix2pix.discriminator(
         norm_type='instancenorm', target=False)
@@ -19,8 +20,7 @@ def convert():
     )
 
     if tf.train.latest_checkpoint('checkpoints'):
-
-        manager = tf.train.CheckpointManager(ckpt, 'checkpoints', 5)
+        manager = tf.train.CheckpointManager(ckpt, 'checkpoints', 5, )
 
         for index, chpt in enumerate(manager.checkpoints):
             print(f'{index} : {chpt}')
