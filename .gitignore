@@ -1,1 +1,5 @@
 *_gan/
+train.py
+.vscode/
+__pycache__/
+logs/
