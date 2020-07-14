@@ -93,7 +93,7 @@ def textparser(text):
 
     link = strings[0]
 
-    return link, strings[-20]
+    return link, new_strings[-20]
 
 
 # BECARE NOT UPDATED
@@ -286,7 +286,7 @@ def train(args):
         final_time = time.time() - init_time
 
         with train_summary_writer.as_default():
-            for test in mends.skip(TAKEN_NUM + 1).take(1):
+            for test in mends.take(1):
                 image = cyclegan.fgan(tf.expand_dims(test, 0))
                 stacked_image = tf.stack([image[0], test]) * 0.5 + 0.5
                 tf.summary.image('m from fm', stacked_image, epoch)
