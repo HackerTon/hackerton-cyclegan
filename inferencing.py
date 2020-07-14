@@ -13,10 +13,10 @@ def convert():
         norm_type='instancenorm', target=False)
 
     ckpt = tf.train.Checkpoint(
-        g_gan=g_gan,
-        f_gan=f_gan,
-        dis_g=dis_g,
-        dis_f=dis_f
+        ggan=g_gan,
+        fgan=f_gan,
+        gdis=dis_g,
+        fdis=dis_f
     )
 
     if tf.train.latest_checkpoint('checkpoints'):

@@ -10,13 +10,15 @@ from tensorflow import python
 from tensorflow_examples.models.pix2pix import pix2pix
 
 import model
+import scheduler
 
-NUM_ITERATION = 100
-LAMBDA = tf.constant(10, tf.float32)
+NUM_ITERATION = 200
+LAMBDA = tf.constant(5, tf.float32)
 TAKEN_NUM = 1000
 BETA_1 = 0.5
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 LEARNING_RATE = 2e-4
+WIDTH = 256
 
 tf.random.set_seed(123456)
 
@@ -33,23 +35,17 @@ class Pool:
         """
 
         if step < self.size:
+            self.images.append(image)
             return image
+        else:
+            if random.randint(0, 1):
+                index = random.randint(0, self.size - 1)
+                temp = self.images[index]
+                self.images[index] = image
 
-        if random.randint(0, 1) == 0:
-            return image
-
-        index = random.randint(0, self.size - 1)
-        return self.images[index]
-
-    def write(self, step, image):
-        """
-        update images
-        """
-
-        if len(self.images) > self.size:
-            self.images.pop(-1)
-
-        self.images.append(image)
+                return temp
+            else:
+                return image
 
 
 def readdecode(filename):
@@ -60,8 +56,8 @@ def readdecode(filename):
 
     image = tf.image.decode_jpeg(raw, channels=3)
     image = tf.image.convert_image_dtype(image, tf.float32)
-    image = tf.image.resize(image, (130, 130))
-    image = tf.image.random_crop(image, [128, 128, 3])
+    image = tf.image.resize(image, (WIDTH + 10, WIDTH + 10))
+    image = tf.image.random_crop(image, [WIDTH, WIDTH, 3])
     image = image * 2 - 1
 
     return image
@@ -97,7 +93,7 @@ def textparser(text):
 
     link = strings[0]
 
-    return link, new_strings[-20]
+    return link, strings[-20]
 
 
 # BECARE NOT UPDATED
@@ -167,10 +163,13 @@ class Cyclegan:
         self.fdis = pix2pix.discriminator(
             norm_type='instancenorm', target=False)
 
-        self.opti_ggan = tf.keras.optimizers.Adam(LEARNING_RATE, BETA_1)
-        self.opti_fgan = tf.keras.optimizers.Adam(LEARNING_RATE, BETA_1)
-        self.opti_gdis = tf.keras.optimizers.Adam(LEARNING_RATE, BETA_1)
-        self.opti_fdis = tf.keras.optimizers.Adam(LEARNING_RATE, BETA_1)
+        self.lrscheculer = scheduler.LinearDecay(
+            TAKEN_NUM * NUM_ITERATION // 2, LEARNING_RATE, TAKEN_NUM * NUM_ITERATION // 2, 0.0)
+
+        self.opti_ggan = tf.keras.optimizers.Adam(self.lrscheculer, BETA_1)
+        self.opti_fgan = tf.keras.optimizers.Adam(self.lrscheculer, BETA_1)
+        self.opti_gdis = tf.keras.optimizers.Adam(self.lrscheculer, BETA_1)
+        self.opti_fdis = tf.keras.optimizers.Adam(self.lrscheculer, BETA_1)
 
     @tf.function
     def step_dis(self, x, y, xrec, yrec, step):
@@ -279,9 +278,6 @@ def train(args):
             step = epoch * TAKEN_NUM + index
             g_out, f_out = cyclegan.step_gan(x, y, step)
 
-            gpool.write(step, g_out)
-            fpool.write(step, f_out)
-
             g_out = gpool.read(step, g_out)
             f_out = fpool.read(step, f_out)
 
@@ -309,7 +305,7 @@ if __name__ == '__main__':
         help="""directory that container imgtextfile and
          img_align_celeba(must end with "/")""")
     parser.add_argument(
-        '--gpu', help='enable low memory mode', action='store_true')
+        '--gpu', help='enable gpu', action='store_true')
     args = parser.parse_args()
 
     train(args)
