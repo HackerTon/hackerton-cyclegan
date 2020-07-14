@@ -14,7 +14,7 @@ import scheduler
 
 NUM_ITERATION = 200
 LAMBDA = tf.constant(5, tf.float32)
-TAKEN_NUM = 1000
+TAKEN_NUM = 1
 BETA_1 = 0.5
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 LEARNING_RATE = 2e-4
