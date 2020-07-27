@@ -1,6 +1,12 @@
+import os
+
 import tensorflow as tf
 from tensorflow_examples.models.pix2pix import pix2pix
+
 from model import generator
+
+# Disable GPU initialization
+os.environ['CUDA_VISIBLE_DEVICES'] = -1
 
 
 def convert():
