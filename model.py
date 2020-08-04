@@ -23,7 +23,7 @@ def resi_block(input_layer, k):
     d2_block = tfa.layers.InstanceNormalization()(d_block)
     d2_block = tf.keras.layers.Activation('relu')(d2_block)
 
-    output = tf.keras.layers.Concatenate()([d2_block, input_layer])
+    output = tf.keras.layers.Add()([d2_block, input_layer])
 
     return output
 
@@ -85,6 +85,29 @@ def generator():
     conv4 = tf.keras.layers.Activation('tanh')(conv4)
 
     return tf.keras.Model(inputs=[x], outputs=[conv4])
+
+
+def disloss(distruth, disfake):
+    loss1 = tf.reduce_mean(tf.square(distruth - tf.ones_like(distruth)))
+    loss2 = tf.reduce_mean(tf.square(disfake))
+
+    return (loss1 + loss2) * 0.5
+
+
+def identity_loss(fakeimage, realimage):
+    loss = tf.reduce_mean(tf.abs(fakeimage - realimage))
+    return 0.5 * loss
+
+
+def ganloss(disfake):
+    return tf.reduce_mean(tf.square(disfake - tf.ones_like(disfake)))
+
+
+def cycleloss(fakex, fakey, realx, realy):
+    loss1 = tf.reduce_mean(tf.abs(fakex - realx))
+    loss2 = tf.reduce_mean(tf.abs(fakey - realy))
+
+    return loss1 + loss2
 
 
 class Cyclegan:

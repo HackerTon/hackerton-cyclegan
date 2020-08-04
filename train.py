@@ -56,29 +56,6 @@ def readdecode(filename, width):
     return image
 
 
-def disloss(distruth, disfake):
-    loss1 = tf.reduce_mean(tf.square(distruth - tf.ones_like(distruth)))
-    loss2 = tf.reduce_mean(tf.square(disfake))
-
-    return (loss1 + loss2) * 0.5
-
-
-def identity_loss(fakeimage, realimage):
-    loss = tf.reduce_mean(tf.abs(fakeimage - realimage))
-    return 0.5 * loss
-
-
-def ganloss(disfake):
-    return tf.reduce_mean(tf.square(disfake - tf.ones_like(disfake)))
-
-
-def cycleloss(fakex, fakey, realx, realy):
-    loss1 = tf.reduce_mean(tf.abs(fakex - realx))
-    loss2 = tf.reduce_mean(tf.abs(fakey - realy))
-
-    return loss1 + loss2
-
-
 def textparser(text):
     strings = tf.strings.split(text, ' ')
     mask = tf.strings.regex_full_match(strings, '-?1')
@@ -112,7 +89,7 @@ def create_dataset_celb(dir, width):
 
 
 def train(args):
-    date_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    date_time = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     train_log_dir = f'logs/{date_time}/train'
     train_summary_writer = tf.summary.create_file_writer(train_log_dir)
 
